@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Live Hub</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="main-header">
+            <div class="logo">
+                <i class="fa-solid fa-basketball"></i>
+                <h1>NBA Live Hub</h1>
+            </div>
+            <div class="date-navigator">
+                <button id="prev-day" class="nav-btn" aria-label="Previous Day"><i class="fa-solid fa-chevron-left"></i></button>
+                <div class="date-display">
+                    <span id="current-date">Today</span>
+                    <input type="date" id="date-picker">
+                </div>
+                <button id="next-day" class="nav-btn" aria-label="Next Day"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+            <div class="header-actions">
+                <button id="refresh-btn" class="icon-btn" aria-label="Refresh Data">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+        </header>
+
+        <main id="games-grid" class="games-grid">
+            <!-- Games will be injected here -->
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <p>Loading games...</p>
+            </div>
+        </main>
+
+        <footer class="main-footer">
+            <p>Data provided by NBA. Not affiliated with the National Basketball Association.</p>
+        </footer>
+    </div>
+
+    <!-- Templates for JS to populate -->
+    <template id="game-card-template">
+        <article class="game-card">
+            <div class="game-status">
+                <span class="status-badge">Live</span>
+                <span class="game-clock">Q4 2:30</span>
+            </div>
+            <div class="teams-container">
+                <div class="team home-team">
+                    <div class="team-info">
+                        <img src="" alt="Home Logo" class="team-logo home-logo">
+                        <div class="name-record">
+                            <span class="team-name home-name">Lakers</span>
+                            <span class="team-record home-record">20-15</span>
+                        </div>
+                    </div>
+                    <div class="team-score home-score">102</div>
+                </div>
+                <div class="teams-divider">vs</div>
+                <div class="team visitor-team">
+                    <div class="team-score visitor-score">98</div>
+                    <div class="team-info">
+                        <div class="name-record">
+                            <span class="team-name visitor-name">Warriors</span>
+                            <span class="team-record visitor-record">18-17</span>
+                        </div>
+                        <img src="" alt="Visitor Logo" class="team-logo visitor-logo">
+                    </div>
+                </div>
+            </div>
+            <div class="game-details">
+                <div class="leaders">
+                    <div class="leader home-leader">
+                        <span class="leader-name">L. James</span>
+                        <span class="leader-stat">28 PTS</span>
+                    </div>
+                    <div class="leader visitor-leader">
+                        <span class="leader-name">S. Curry</span>
+                        <span class="leader-stat">32 PTS</span>
+                    </div>
+                </div>
+                <!-- Broadcasters info could go here -->
+            </div>
+        </article>
+    </template>
+
+    <script src="app.js"></script>
+</body>
+</html>
