@@ -3,6 +3,8 @@ class NBAApp {
         this.currentDate = new Date();
         this.games = [];
         this.refreshIntervalId = null;
+        // inside constructor or before fetchLiveScoreboard is used
+this.liveProxyBase = 'https://live-game-stats-proxy.winter-sky-692e.kdrolle594.workers.dev/?url=';
 
         // Grab DOM with defensive fallbacks
         this.dom = {
@@ -154,14 +156,28 @@ class NBAApp {
     }
 
     async fetchLiveScoreboard() {
-        // Use CDN for today's live data
-        const response = await fetch('https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json');
-        if (!response.ok) throw new Error('Network response was not ok');
-        const data = await response.json();
-        // Defensive: data.scoreboard.games might be nested or named differently
-        const games = (data && (data.scoreboard?.games || data.games || [])) || [];
+    const targetUrl = 'https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json';
+
+    // Try direct fetch first (fast when allowed)
+    try {
+        const resp = await fetch(targetUrl);
+        if (!resp.ok) throw new Error('Direct fetch failed');
+        const data = await resp.json();
+        const games = data?.scoreboard?.games ?? data?.games ?? [];
+        return this.normalizeLiveGames(games);
+    } catch (directErr) {
+        console.warn('Direct fetch failed (likely CORS). Trying proxy if configured.', directErr);
+
+        if (!this.liveProxyBase) throw directErr; // no proxy configured, bubble up to fallback
+
+        const proxyUrl = `${this.liveProxyBase}${encodeURIComponent(targetUrl)}`;
+        const resp2 = await fetch(proxyUrl);
+        if (!resp2.ok) throw new Error('Proxy fetch failed');
+        const data2 = await resp2.json();
+        const games = data2?.scoreboard?.games ?? data2?.games ?? [];
         return this.normalizeLiveGames(games);
     }
+}
 
     async fetchHistoricalScoreboard(dateStr) {
         // Date format for stats API: MM/DD/YYYY
