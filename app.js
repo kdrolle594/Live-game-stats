@@ -4,7 +4,7 @@ class NBAApp {
         this.games = [];
         this.refreshIntervalId = null;
         // inside constructor or before fetchLiveScoreboard is used
-this.liveProxyBase = 'https://live-game-stats-proxy.winter-sky-692e.kdrolle594.workers.dev/?url=';
+        this.liveProxyBase = 'https://winter-sky-692e.kdrolle594.workers.dev/?url=';
 
         // Grab DOM with defensive fallbacks
         this.dom = {
@@ -156,228 +156,122 @@ this.liveProxyBase = 'https://live-game-stats-proxy.winter-sky-692e.kdrolle594.w
     }
 
     async fetchLiveScoreboard() {
-    const targetUrl = 'https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json';
+        console.log('Using ESPN Live Fetch Path');
+        const targetUrl = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
+        // Note: ESPN 'live' endpoint is just the same scoreboard endpoint without specific dates (defaults to today)
+        // However, to be safe and consistent with previous logic, we can explicitly pass today's date if needed.
+        // But the user reported "current day no longer work". 
+        // Let's stick to the explicit date construction for consistency.
 
-    // Try direct fetch first (fast when allowed)
-    try {
-        const resp = await fetch(targetUrl);
-        if (!resp.ok) throw new Error('Direct fetch failed');
-        const data = await resp.json();
-        const games = data?.scoreboard?.games ?? data?.games ?? [];
-        return this.normalizeLiveGames(games);
-    } catch (directErr) {
-        console.warn('Direct fetch failed (likely CORS). Trying proxy if configured.', directErr);
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        const dateStr = `${year}${month}${day}`;
 
-        if (!this.liveProxyBase) throw directErr; // no proxy configured, bubble up to fallback
+        const fullTargetUrl = `http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${dateStr}`;
+        const proxyUrl = `${this.liveProxyBase}${encodeURIComponent(fullTargetUrl)}`;
 
-        const proxyUrl = `${this.liveProxyBase}${encodeURIComponent(targetUrl)}`;
-        const resp2 = await fetch(proxyUrl);
-        if (!resp2.ok) throw new Error('Proxy fetch failed');
-        const data2 = await resp2.json();
-        const games = data2?.scoreboard?.games ?? data2?.games ?? [];
-        return this.normalizeLiveGames(games);
+        console.log('Fetching Live URL:', proxyUrl);
+
+        try {
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error('Failed to fetch live data from ESPN');
+            const data = await response.json();
+            console.log('ESPN Live Data:', data);
+            return this.normalizeESPNGames(data);
+        } catch (error) {
+            console.error('ESPN Live Fetch failed', error);
+            throw error;
+        }
     }
-}
 
     async fetchHistoricalScoreboard(dateStr) {
-        // Date format for stats API: MM/DD/YYYY
-        const [year, month, day] = dateStr.split('-');
-        const formattedDate = `${month}/${day}/${year}`;
-        const encodedDate = encodeURIComponent(formattedDate);
+        // Date format: YYYY-MM-DD
+        const formattedDate = dateStr.replace(/-/g, ''); // 20240201
 
-        // Using a CORS proxy to bypass browser restrictions
-        const targetUrl = `https://stats.nba.com/stats/scoreboardv2?DayOffset=0&LeagueID=00&gameDate=${encodedDate}`;
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+        // ESPN API Endpoint
+        const targetUrl = `http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${formattedDate}`;
+        const proxyUrl = `${this.liveProxyBase}${encodeURIComponent(targetUrl)}`;
 
         const response = await fetch(proxyUrl);
-        if (!response.ok) throw new Error('Failed to fetch historical data');
+        if (!response.ok) throw new Error('Failed to fetch historical data from ESPN');
         const data = await response.json();
-        return this.normalizeHistoricalGames(data);
+        return this.normalizeESPNGames(data);
     }
 
-    normalizeLiveGames(games) {
-        return (games || []).map(game => {
-            // safe access for period and clock
-            const period = (game.period && (game.period.current ?? game.period)) ?? game.period ?? '';
-            const clock = game.gameClock ?? game.clock ?? '';
-
-            // Team objects may be under different keys depending on source
-            const home = game.homeTeam ?? game.hTeam ?? game.home ?? {};
-            const away = game.awayTeam ?? game.vTeam ?? game.away ?? {};
-
-            const leaders = game.gameLeaders ?? game.leaders ?? null;
-
-            const statusVal = Number(game.gameStatus ?? game.status ?? 1);
-
-            return {
-                id: game.gameId ?? game.game_id ?? String(game.gameCode || ''),
-                status: game.gameStatusText ?? game.statusText ?? '',
-                statusCode: statusVal, // 1: Not Started, 2: Live, 3: Final
-                clock: statusVal === 2 ? `Q${period} ${clock}` : (game.gameStatusText ?? game.statusText ?? ''),
-                isLive: statusVal === 2,
-                home: {
-                    id: home.teamId ?? home.team_id ?? home.teamId ?? null,
-                    tricode: home.teamTricode ?? home.tricode ?? home.triCode ?? null,
-                    name: home.teamName ?? home.nickname ?? home.fullName ?? '',
-                    score: Number(home.score ?? home.points ?? 0),
-                    wins: home.wins ?? home.win ?? null,
-                    losses: home.losses ?? home.loss ?? null
-                },
-                away: {
-                    id: away.teamId ?? away.team_id ?? away.teamId ?? null,
-                    tricode: away.teamTricode ?? away.tricode ?? away.triCode ?? null,
-                    name: away.teamName ?? away.nickname ?? away.fullName ?? '',
-                    score: Number(away.score ?? away.points ?? 0),
-                    wins: away.wins ?? away.win ?? null,
-                    losses: away.losses ?? away.loss ?? null
-                },
-                leaders: leaders ? {
-                    home: this.formatLeader(leaders.homeLeaders ?? leaders.home ?? leaders.homeLeader ?? null),
-                    away: this.formatLeader(leaders.awayLeaders ?? leaders.away ?? leaders.awayLeader ?? null)
-                } : null
-            };
-        });
-    }
-
-    normalizeHistoricalGames(data) {
+    normalizeESPNGames(data) {
         // Defensive checks
-        if (!data || !Array.isArray(data.resultSets)) return [];
+        if (!data || !Array.isArray(data.events)) return [];
 
-        // Find sets by name where possible
-        const getResultSet = (nameGuess, fallbackIndex) => {
-            const found = data.resultSets.find(rs => (rs.name && rs.name.toLowerCase().includes(nameGuess.toLowerCase())));
-            return found || data.resultSets[fallbackIndex] || null;
-        };
+        return data.events.map(event => {
+            const comp = event.competitions[0];
+            const home = comp.competitors.find(c => c.homeAway === 'home');
+            const away = comp.competitors.find(c => c.homeAway === 'away');
+            const status = event.status.type;
 
-        const headerSet = getResultSet('GameHeader', 0);
-        const lineScoreSet = getResultSet('LineScore', 1);
+            // Leaders parsing
+            // ESPN structure: comp.leaders is array of categories (Points, Rebounds, Assists)
+            // We want the "Points" category (usually index 0 or name="points")
+            // Then inside, we find the leader for each team.
+            let homeLeader = null;
+            let awayLeader = null;
 
-        if (!headerSet || !Array.isArray(headerSet.rowSet)) return [];
+            try {
+                if (comp.leaders) {
+                    // Category can be "points" or "Points"
+                    const pointsCat = comp.leaders.find(c => c.name.toLowerCase() === 'points' || c.shortDisplayName === 'Pts');
+                    if (pointsCat && pointsCat.leaders) {
+                        const homeLdrParams = pointsCat.leaders.find(l => l.team.id === home.team.id);
+                        const awayLdrParams = pointsCat.leaders.find(l => l.team.id === away.team.id);
 
-        const headers = headerSet.headers || [];
-        const headerRows = headerSet.rowSet || [];
-        const lineHeaders = (lineScoreSet && (lineScoreSet.headers || [])) || [];
-        const lineRows = (lineScoreSet && lineScoreSet.rowSet) || [];
+                        if (homeLdrParams && homeLdrParams.athlete) {
+                            homeLeader = { name: homeLdrParams.athlete.shortName, stat: homeLdrParams.displayValue };
+                        }
+                        if (awayLdrParams && awayLdrParams.athlete) {
+                            awayLeader = { name: awayLdrParams.athlete.shortName, stat: awayLdr.displayValue };
+                        }
+                    }
+                }
+            } catch (e) { console.warn('Leader parse error', e); }
 
-        // helper to find column index by name (case-insensitive)
-        const idx = (name) => {
-            const i = headers.findIndex(h => String(h).toLowerCase() === name.toLowerCase());
-            return i >= 0 ? i : -1;
-        };
-
-        const lhIdx = (name) => {
-            const i = lineHeaders.findIndex(h => String(h).toLowerCase() === name.toLowerCase());
-            return i >= 0 ? i : -1;
-        };
-
-        const gameIdIdx = idx('GAME_ID') >= 0 ? idx('GAME_ID') : 2; // fallback
-        const statusIdx = idx('GAME_STATUS_TEXT') >= 0 ? idx('GAME_STATUS_TEXT') : 4;
-        const homeIdIdx = idx('HOME_TEAM_ID') >= 0 ? idx('HOME_TEAM_ID') : 6;
-        const awayIdIdx = idx('VISITOR_TEAM_ID') >= 0 ? idx('VISITOR_TEAM_ID') : 7;
-        const homeRecIdx = idx('HOME_TEAM_WINS_LOSSES') >= 0 ? idx('HOME_TEAM_WINS_LOSSES') : 8;
-        const awayRecIdx = idx('VISITOR_TEAM_WINS_LOSSES') >= 0 ? idx('VISITOR_TEAM_WINS_LOSSES') : 9;
-
-        const ptsIdxLine = lhIdx('PTS') >= 0 ? lhIdx('PTS') : 22; // common fallback
-
-        // parse record like "20-10" -> {wins, losses}
-        const parseRecord = (rec) => {
-            if (!rec) return { wins: null, losses: null };
-            if (typeof rec === 'string' && rec.includes('-')) {
-                const [w, l] = rec.split('-').map(s => parseInt(s, 10));
-                return { wins: isNaN(w) ? null : w, losses: isNaN(l) ? null : l };
-            }
-            return { wins: null, losses: null };
-        };
-
-        return headerRows.map(row => {
-            const gameId = row[gameIdIdx];
-            const statusText = row[statusIdx] || '';
-            const homeTeamId = row[homeIdIdx];
-            const awayTeamId = row[awayIdIdx];
-
-            // find corresponding line rows using loose equality
-            const homeLine = lineRows.find(l => String(l[2]) === String(gameId) && String(l[3]) === String(homeTeamId)) || [];
-            const awayLine = lineRows.find(l => String(l[2]) === String(gameId) && String(l[3]) === String(awayTeamId)) || [];
-
-            const homeRec = parseRecord(row[homeRecIdx]);
-            const awayRec = parseRecord(row[awayRecIdx]);
+            // Status code mapping
+            // ESPN: STATUS_SCHEDULED, STATUS_IN_PROGRESS, STATUS_FINAL
+            let statusCode = 1;
+            if (status.state === 'in') statusCode = 2;
+            if (status.state === 'post') statusCode = 3;
 
             return {
-                id: String(gameId),
-                status: statusText,
-                statusCode: (String(statusText).toLowerCase().includes('final') ? 3 : 1),
-                clock: statusText,
-                isLive: false,
+                id: event.id,
+                status: status.shortDetail,
+                statusCode: statusCode,
+                clock: status.shortDetail, // e.g. "Final", "Q4 2:30"
+                isLive: statusCode === 2,
                 home: {
-                    id: homeTeamId,
-                    tricode: this.getTeamTricode(homeTeamId),
-                    name: '', // fill if you add a team metadata map
-                    score: Number(homeLine[ptsIdxLine] ?? 0),
-                    wins: homeRec.wins,
-                    losses: homeRec.losses
+                    id: home.team.id,
+                    tricode: home.team.abbreviation,
+                    name: home.team.name, // e.g. "Lakers"
+                    // ESPN logo is often nested in team.logo or team.logos[0].href
+                    logo: home.team.logo || (home.team.logos && home.team.logos[0] && home.team.logos[0].href) || '',
+                    score: Number(home.score),
+                    wins: null,
+                    losses: null
                 },
                 away: {
-                    id: awayTeamId,
-                    tricode: this.getTeamTricode(awayTeamId),
-                    name: '',
-                    score: Number(awayLine[ptsIdxLine] ?? 0),
-                    wins: awayRec.wins,
-                    losses: awayRec.losses
+                    id: away.team.id,
+                    tricode: away.team.abbreviation,
+                    name: away.team.name,
+                    logo: away.team.logo || (away.team.logos && away.team.logos[0] && away.team.logos[0].href) || '',
+                    score: Number(away.score),
+                    wins: null,
+                    losses: null
                 },
-                leaders: null
+                leaders: {
+                    home: homeLeader,
+                    away: awayLeader
+                }
             };
         });
-    }
-
-    formatLeader(leader) {
-        if (!leader) return null;
-
-        // leader could be:
-        // - an object with { name, points }
-        // - { firstName, lastName, points }
-        // - { playerName, pts } etc.
-        // - could be an array (mock)
-        if (Array.isArray(leader)) {
-            leader = leader[0] || null;
-            if (!leader) return null;
-        }
-
-        const name =
-            leader.name ||
-            ((leader.firstName || leader.lastName) ? `${leader.firstName || ''} ${leader.lastName || ''}`.trim() : null) ||
-            leader.playerName ||
-            leader.personFullName ||
-            leader.player ||
-            '';
-
-        const pts = leader.points ?? leader.pts ?? leader.PTS ?? leader.pointsScored ?? null;
-
-        const stat = pts != null ? `${pts} PTS` : (
-            (typeof leader.stat === 'string' ? leader.stat : (Array.isArray(leader.stat) ? leader.stat.join(', ') : ''))
-        );
-
-        return {
-            name: name || '',
-            stat: stat || ''
-        };
-    }
-
-    // Small team mapping for historical fallback - extend as needed.
-    getTeamTricode(id) {
-        const map = {
-            // common examples (extend this map for completeness)
-            1610612747: 'LAL',
-            1610612738: 'BOS',
-            1610612744: 'GSW',
-            1610612756: 'PHX',
-            1610612746: 'BKN',
-            1610612741: 'CHI',
-            1610612760: 'SAC'
-        };
-
-        // Some APIs return string ids — normalize to number where possible
-        const parsed = Number(id);
-        return map[parsed] || map[id] || 'NBA';
     }
 
     getMockData() {
@@ -494,9 +388,14 @@ this.liveProxyBase = 'https://live-game-stats-proxy.winter-sky-692e.kdrolle594.w
         const scoreEl = card.querySelector(`${prefix}-score`);
 
         // Logo
+        // Logo
         if (logoEl) {
-            // Use team.id to build a CDN logo url when present
-            if (team?.id) {
+            // Priority: URL provided in data (ESPN) > NBA CDN fallback
+            if (team?.logo) {
+                logoEl.src = team.logo;
+                logoEl.alt = team.name || 'Team Logo';
+            } else if (team?.id) {
+                // Fallback for mock data or if ID is standard NBA ID
                 logoEl.src = `https://cdn.nba.com/logos/nba/${team.id}/global/L/logo.svg`;
                 logoEl.alt = team.name || team.tricode || 'Team Logo';
             } else {
