@@ -9,7 +9,7 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 
     <!-- Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -21,36 +21,44 @@
     <div class="app-container">
         <header class="main-header">
             <div class="logo">
-                <i class="fa-solid fa-basketball"></i>
+                <i class="fa-solid fa-basketball" aria-hidden="true"></i>
                 <h1>NBA Live Hub</h1>
             </div>
             <div class="date-navigator">
-                <button id="prev-day" class="nav-btn" aria-label="Previous Day"><i
+                <button id="prev-day" class="nav-btn" aria-label="Previous day"><i
                         class="fa-solid fa-chevron-left"></i></button>
-                <div class="date-display">
+                <label class="date-display">
                     <span id="current-date">Today</span>
-                    <input type="date" id="date-picker">
-                </div>
-                <button id="next-day" class="nav-btn" aria-label="Next Day"><i
+                    <input type="date" id="date-picker" aria-label="Pick a date">
+                </label>
+                <button id="next-day" class="nav-btn" aria-label="Next day"><i
                         class="fa-solid fa-chevron-right"></i></button>
             </div>
             <div class="header-actions">
-                <button id="refresh-btn" class="icon-btn" aria-label="Refresh Data">
+                <button id="today-btn" class="text-btn">Today</button>
+                <button id="refresh-btn" class="icon-btn" aria-label="Refresh scores">
                     <i class="fa-solid fa-rotate-right"></i>
                 </button>
             </div>
         </header>
 
-        <main id="games-grid" class="games-grid">
-            <!-- Games will be injected here -->
-            <div class="loading-state">
-                <div class="spinner"></div>
-                <p>Loading games...</p>
+        <section id="top-performers" class="top-performers" aria-labelledby="top-title" hidden>
+            <h2 id="top-title" class="section-title">Top performers</h2>
+            <ol id="top-list" class="top-list"></ol>
+        </section>
+
+        <section aria-labelledby="games-title">
+            <h2 id="games-title" class="section-title">Games <span id="games-count" class="count"></span></h2>
+            <div id="games-grid" class="games-grid" aria-live="polite">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading games…</p>
+                </div>
             </div>
-        </main>
+        </section>
 
         <footer class="main-footer">
-            <p>Data provided by NBA. Not affiliated with the National Basketball Association.</p>
+            <p>Data from ESPN. Not affiliated with the National Basketball Association.</p>
         </footer>
     </div>
 
@@ -58,48 +66,41 @@
     <template id="game-card-template">
         <article class="game-card">
             <div class="game-status">
-                <span class="status-badge">Live</span>
-                <span class="game-clock">Q4 2:30</span>
+                <span class="status-badge"></span>
+                <span class="game-clock"></span>
             </div>
             <div class="teams-container">
+                <div class="team away-team">
+                    <img src="" alt="" class="team-logo away-logo">
+                    <div class="name-record">
+                        <span class="team-name away-name"></span>
+                        <span class="team-record away-record"></span>
+                    </div>
+                    <div class="team-score away-score"></div>
+                </div>
                 <div class="team home-team">
-                    <div class="team-info">
-                        <img src="" alt="Home Logo" class="team-logo home-logo">
-                        <div class="name-record">
-                            <span class="team-name home-name">Lakers</span>
-                            <span class="team-record home-record">20-15</span>
-                        </div>
+                    <img src="" alt="" class="team-logo home-logo">
+                    <div class="name-record">
+                        <span class="team-name home-name"></span>
+                        <span class="team-record home-record"></span>
                     </div>
-                    <div class="team-score home-score">102</div>
-                </div>
-                <div class="teams-divider">vs</div>
-                <div class="team visitor-team">
-                    <div class="team-score visitor-score">98</div>
-                    <div class="team-info">
-                        <div class="name-record">
-                            <span class="team-name visitor-name">Warriors</span>
-                            <span class="team-record visitor-record">18-17</span>
-                        </div>
-                        <img src="" alt="Visitor Logo" class="team-logo visitor-logo">
-                    </div>
+                    <div class="team-score home-score"></div>
                 </div>
             </div>
-            <!--            <div class="game-details">
-                <div class="leaders">
-                    <div class="leader home-leader">
-                        <span class="leader-name">L. James</span>
-                        <span class="leader-stat">28 PTS</span>
-                    </div>
-                    <div class="leader visitor-leader">
-                        <span class="leader-name">S. Curry</span>
-                        <span class="leader-stat">32 PTS</span>
-                    </div>
-                </div>
--->
-            <!-- Broadcasters info could go here -->
-            </div>
+            <div class="leaders"></div>
+            <button class="card-open" type="button">Box score</button>
         </article>
     </template>
+
+    <dialog id="game-dialog" class="game-dialog" aria-labelledby="dialog-title">
+        <div class="dialog-head">
+            <h2 id="dialog-title"></h2>
+            <button class="icon-btn dialog-close" type="button" aria-label="Close box score">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div id="dialog-body" class="dialog-body"></div>
+    </dialog>
 
     <script src="app.js"></script>
 </body>
