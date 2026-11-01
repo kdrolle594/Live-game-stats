@@ -699,12 +699,15 @@ class NBAApp {
             return row;
         };
 
+        // ESPN keys teams by slug (e.g. "golden-state-warriors"); match by slug or id
+        const teamList = Object.values(teams);
         const seasons = (cat.statistics || []).map(s => {
-            const t = teams[s.teamId] || {};
+            const t = teams[s.teamSlug] || teams[s.teamId]
+                || teamList.find(x => String(x.id) === String(s.teamId)) || {};
             return {
                 year: s.season?.year ?? 0,
                 season: s.season?.displayName || String(s.season?.year || ''),
-                team: s.teamSlug && !t.abbreviation ? s.teamSlug.toUpperCase().slice(0, 4) : (t.abbreviation || ''),
+                team: t.abbreviation || '',
                 stats: pick(s.stats)
             };
         }).sort((a, b) => b.year - a.year);
