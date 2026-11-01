@@ -22,6 +22,44 @@ const TEAM_STATS = [
 ];
 
 const ESPN_BASE = 'http://site.api.espn.com/apis/site/v2/sports/basketball/nba';
+const ESPN_ATHLETE = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes';
+const ESPN_CORE_ATHLETE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes';
+
+// Season table columns: label shown -> ESPN stat labels to look for
+const SEASON_COLS = [
+    { label: 'GP', keys: ['GP'] },
+    { label: 'MIN', keys: ['MIN'] },
+    { label: 'PTS', keys: ['PTS'] },
+    { label: 'REB', keys: ['REB'] },
+    { label: 'AST', keys: ['AST'] },
+    { label: 'STL', keys: ['STL'] },
+    { label: 'BLK', keys: ['BLK'] },
+    { label: 'FG%', keys: ['FG%'] },
+    { label: '3P%', keys: ['3P%', '3PT%'] },
+    { label: 'FT%', keys: ['FT%'] }
+];
+
+// Awards shown on the player card, most prestigious first.
+// Matched against ESPN award names; anything unmatched is dropped.
+const AWARDS = [
+    { label: 'MVP', test: /^(nba )?(most valuable player|mvp)$/i },
+    { label: 'Champion', test: /champion/i },
+    { label: 'Finals MVP', test: /finals (mvp|most valuable)/i },
+    { label: 'DPOY', test: /defensive player of the year/i },
+    { label: 'All-NBA 1st', test: /all-nba (1st|first)/i },
+    { label: 'All-NBA 2nd', test: /all-nba (2nd|second)/i },
+    { label: 'All-NBA 3rd', test: /all-nba (3rd|third)/i },
+    { label: 'All-NBA', test: /all-nba/i },
+    { label: 'All-Defensive 1st', test: /all-defensive (1st|first)/i },
+    { label: 'All-Defensive 2nd', test: /all-defensive (2nd|second)/i },
+    { label: 'All-Defensive', test: /all-defensive/i },
+    { label: 'All-Star', test: /all-star/i },
+    { label: 'Rookie of the Year', test: /rookie of the year/i },
+    { label: 'Most Improved', test: /most improved/i },
+    { label: 'Sixth Man', test: /sixth man/i },
+    { label: 'Clutch Player', test: /clutch/i },
+    { label: 'All-Rookie', test: /all-rookie/i }
+];
 
 class NBAApp {
     constructor() {
@@ -29,6 +67,8 @@ class NBAApp {
         this.games = [];
         this.openGameId = null;
         this.refreshIntervalId = null;
+        this.openPlayerId = null;
+        this.playerCache = new Map();
         this.liveProxyBase = 'https://winter-sky-692e.kdrolle594.workers.dev/?url=';
 
         this.dom = {
@@ -45,7 +85,9 @@ class NBAApp {
             template: document.getElementById('game-card-template'),
             dialog: document.getElementById('game-dialog'),
             dialogTitle: document.getElementById('dialog-title'),
-            dialogBody: document.getElementById('dialog-body')
+            dialogBody: document.getElementById('dialog-body'),
+            playerDialog: document.getElementById('player-dialog'),
+            playerBody: document.getElementById('player-body')
         };
 
         this.init();
@@ -99,6 +141,19 @@ class NBAApp {
             if (e.target === dialog) dialog.close();
         });
         dialog?.addEventListener('close', () => { this.openGameId = null; });
+
+        // Player names in the box score open the player card
+        this.dom.dialogBody?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.pname-btn');
+            if (btn) this.openPlayerCard(btn.dataset.playerId, this.openGameId, btn.dataset.side);
+        });
+
+        const playerDialog = this.dom.playerDialog;
+        playerDialog?.querySelector('.dialog-close')?.addEventListener('click', () => playerDialog.close());
+        playerDialog?.addEventListener('click', (e) => {
+            if (e.target === playerDialog) playerDialog.close();
+        });
+        playerDialog?.addEventListener('close', () => { this.openPlayerId = null; });
     }
 
     changeDate(days) {
@@ -265,6 +320,7 @@ class NBAApp {
                         name: a.athlete.displayName,
                         shortName: a.athlete.shortName,
                         position: a.athlete.position?.abbreviation || '',
+                        jersey: a.athlete.jersey || '',
                         headshot: a.athlete.headshot?.href,
                         starter: !!a.starter,
                         line
@@ -528,7 +584,7 @@ class NBAApp {
 
         const body = players.map(p => `
             <tr class="${p.starter ? 'starter' : ''}">
-                <th scope="row"><span class="pname">${this.escape(p.shortName || p.name)}</span><span class="ppos">${this.escape(p.position)}</span></th>
+                <th scope="row"><button type="button" class="pname pname-btn" data-player-id="${this.escape(p.id)}" data-side="${side}" aria-label="View ${this.escape(p.name)} stat card">${this.escape(p.shortName || p.name)}</button><span class="ppos">${this.escape(p.position)}</span></th>
                 ${cols.map(c => {
                     const v = p.line[c] ?? '';
                     const lead = leaders[c]?.[side];
@@ -544,6 +600,209 @@ class NBAApp {
                     <table>
                         <thead><tr><th scope="col">Player</th>${cols.map(c => `<th scope="col">${c}</th>`).join('')}</tr></thead>
                         <tbody>${body}</tbody>
+                    </table>
+                </div>
+            </section>`;
+    }
+
+    // ---------- Player stat card ----------
+
+    async openPlayerCard(playerId, gameId, side) {
+        const game = this.games.find(g => g.id === gameId);
+        const player = game?.box?.[side]?.find(p => String(p.id) === String(playerId));
+        const { playerDialog, playerBody } = this.dom;
+        if (!player || !playerDialog) return;
+
+        const team = game[side];
+        this.openPlayerId = player.id;
+        playerDialog.style.setProperty('--team', team.color || 'var(--panel-2)');
+        playerBody.innerHTML = this.playerCardHtml(player, team, null);
+        this.hideBrokenImage(playerBody.querySelector('.pc-photo'));
+        if (!playerDialog.open) playerDialog.showModal();
+
+        const data = await this.loadPlayerData(player.id);
+        // Ignore if the user closed or switched players while loading
+        if (this.openPlayerId !== player.id) return;
+        playerBody.innerHTML = this.playerCardHtml(player, team, data);
+        this.hideBrokenImage(playerBody.querySelector('.pc-photo'));
+    }
+
+    // Stats and awards load separately so one failing doesn't block the other
+    loadPlayerData(id) {
+        if (!this.playerCache.has(id)) {
+            const job = Promise.all([
+                this.fetchPlayerStats(id).catch(err => { console.error('Player stats', err); return null; }),
+                this.fetchPlayerAwards(id).catch(err => { console.error('Player awards', err); return null; })
+            ]).then(([stats, awards]) => {
+                // Don't cache failures, so reopening retries
+                if (!stats || !awards) this.playerCache.delete(id);
+                return { stats, awards };
+            });
+            this.playerCache.set(id, job);
+        }
+        return this.playerCache.get(id);
+    }
+
+    async fetchJson(url) {
+        const res = await fetch(this.proxied(url));
+        if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+        return res.json();
+    }
+
+    async fetchPlayerStats(id) {
+        const data = await this.fetchJson(`${ESPN_ATHLETE}/${id}/stats`);
+        return this.parseSeasons(data);
+    }
+
+    // ESPN shape: categories[] with labels[] and statistics[] (one per season),
+    // plus totals[] holding career values. We want the per-game "averages" category.
+    parseSeasons(data) {
+        const cats = data?.categories || [];
+        const cat = cats.find(c => c.name === 'averages')
+            || cats.find(c => /average/i.test(c.displayName || ''))
+            || cats[0];
+        if (!cat) return { seasons: [], career: null };
+
+        const labels = cat.labels || cat.names || [];
+        const teams = data.teams || {};
+        const pick = (values) => {
+            const row = {};
+            for (const col of SEASON_COLS) {
+                const i = labels.findIndex(l => col.keys.includes(l));
+                row[col.label] = i >= 0 ? values?.[i] ?? '' : '';
+            }
+            return row;
+        };
+
+        const seasons = (cat.statistics || []).map(s => {
+            const t = teams[s.teamId] || {};
+            return {
+                year: s.season?.year ?? 0,
+                season: s.season?.displayName || String(s.season?.year || ''),
+                team: s.teamSlug && !t.abbreviation ? s.teamSlug.toUpperCase().slice(0, 4) : (t.abbreviation || ''),
+                stats: pick(s.stats)
+            };
+        }).sort((a, b) => b.year - a.year);
+
+        const career = cat.totals?.length ? pick(cat.totals) : null;
+        return { seasons, career };
+    }
+
+    // ESPN core API returns a list of award refs; each ref is fetched for its name.
+    async fetchPlayerAwards(id) {
+        const list = await this.fetchJson(`${ESPN_CORE_ATHLETE}/${id}/awards?limit=200`);
+        const items = list?.items || [];
+
+        // Fetch refs a few at a time to stay polite to the proxy
+        const details = [];
+        for (let i = 0; i < items.length; i += 8) {
+            const chunk = items.slice(i, i + 8).map(item =>
+                item.name ? Promise.resolve(item) : this.fetchJson(item.$ref).catch(() => null));
+            details.push(...await Promise.all(chunk));
+        }
+        return this.groupAwards(details.filter(Boolean));
+    }
+
+    // Group raw awards into { label, count, years } in prestige order
+    groupAwards(awards) {
+        const groups = new Map();
+        for (const a of awards) {
+            const name = a.name || a.displayName || '';
+            if (/runner-up|runner up|finalist/i.test(name)) continue;
+            const match = AWARDS.find(def => def.test.test(name));
+            if (!match) continue;
+            const g = groups.get(match.label) || { label: match.label, count: 0, years: [] };
+            g.count += 1;
+            const year = a.season?.year || (a.season?.$ref || '').match(/seasons\/(\d{4})/)?.[1];
+            if (year) g.years.push(Number(year));
+            groups.set(match.label, g);
+        }
+        const order = AWARDS.map(d => d.label);
+        return [...groups.values()].sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label));
+    }
+
+    // Season as "2025-26" from an end year
+    seasonLabel(year) {
+        return `${year - 1}-${String(year).slice(-2)}`;
+    }
+
+    playerCardHtml(player, team, data) {
+        const photo = this.headshotUrl(player);
+        const initials = (player.name || '').split(' ').map(w => w[0]).join('').slice(0, 2);
+        const meta = [team.name, player.position, player.jersey ? `#${player.jersey}` : ''].filter(Boolean);
+
+        const head = `
+            <header class="pc-head">
+                <div class="pc-photo-wrap" data-initials="${this.escape(initials)}">
+                    ${photo ? `<img class="pc-photo" src="${this.escape(photo)}" alt="${this.escape(player.name)}">` : ''}
+                </div>
+                <div class="pc-id">
+                    <h2 id="player-title" class="pc-name">${this.escape(player.name)}</h2>
+                    <p class="pc-meta">${meta.map(m => `<span>${this.escape(m)}</span>`).join('')}</p>
+                </div>
+            </header>`;
+
+        if (!data) {
+            return `${head}
+                <div class="pc-body" aria-busy="true">
+                    <div class="pc-banners pc-skeleton">${'<span class="pc-banner"></span>'.repeat(4)}</div>
+                    <div class="pc-skeleton pc-skel-table"></div>
+                </div>`;
+        }
+
+        return `${head}
+            <div class="pc-body">
+                ${this.awardsHtml(data.awards)}
+                ${this.seasonsHtml(data.stats)}
+            </div>`;
+    }
+
+    awardsHtml(awards) {
+        if (awards === null) {
+            return `<p class="pc-error">Accolades didn’t load. Close the card and open it again to retry.</p>`;
+        }
+        if (!awards.length) return '';
+        const banners = awards.map(a => {
+            const years = a.years.sort((x, y) => x - y).map(y => this.seasonLabel(y)).join(', ');
+            return `
+                <li class="pc-banner${a.label === 'MVP' || a.label === 'Champion' ? ' gold' : ''}" ${years ? `title="${this.escape(years)}"` : ''}>
+                    <span class="pc-count">${a.count}×</span>
+                    <span class="pc-award">${this.escape(a.label)}</span>
+                </li>`;
+        }).join('');
+        return `
+            <section aria-labelledby="pc-awards-title">
+                <h3 id="pc-awards-title" class="pc-section">Accolades</h3>
+                <ul class="pc-banners">${banners}</ul>
+            </section>`;
+    }
+
+    seasonsHtml(stats) {
+        if (stats === null) {
+            return `<p class="pc-error">Season stats didn’t load. Close the card and open it again to retry.</p>`;
+        }
+        if (!stats.seasons.length) {
+            return `<p class="pc-error">No season stats yet for this player.</p>`;
+        }
+        const cell = (v) => `<td>${this.escape(String(v ?? ''))}</td>`;
+        const rows = stats.seasons.map((s, i) => `
+            <tr class="${i === 0 ? 'pc-current' : ''}">
+                <th scope="row">${this.escape(s.season)}${s.team ? `<span class="ppos">${this.escape(s.team)}</span>` : ''}</th>
+                ${SEASON_COLS.map(c => cell(s.stats[c.label])).join('')}
+            </tr>`).join('');
+        const career = stats.career ? `
+            <tfoot><tr class="pc-career">
+                <th scope="row">Career</th>
+                ${SEASON_COLS.map(c => cell(stats.career[c.label])).join('')}
+            </tr></tfoot>` : '';
+        return `
+            <section aria-labelledby="pc-seasons-title">
+                <h3 id="pc-seasons-title" class="pc-section">Per-game averages</h3>
+                <div class="table-scroll pc-table" tabindex="0" aria-label="Season averages">
+                    <table>
+                        <thead><tr><th scope="col">Season</th>${SEASON_COLS.map(c => `<th scope="col">${c.label}</th>`).join('')}</tr></thead>
+                        <tbody>${rows}</tbody>
+                        ${career}
                     </table>
                 </div>
             </section>`;
