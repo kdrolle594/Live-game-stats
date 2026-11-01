@@ -12,11 +12,12 @@ Click a player name in the box score → modal stat card with photo, season-by-s
 - Loading skeleton; stats and awards load separately so one failure doesn't block the other.
 - Styled with the frontend-design skill to match the arena look.
 
-## Data (Approach A: ESPN via worker proxy)
-- Stats: `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{id}/stats` (season averages + career).
-- Awards: `https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes/{id}/awards` → fetch each award ref, group by name, count seasons.
-- Photo: existing `headshotUrl()`.
-- All requests through `this.proxied(...)`. Cache per player ID in a `Map`.
+## Data (ESPN via worker proxy)
+- Stats: `https://site.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{id}/stats` (season averages + career). Teams keyed by slug.
+- Awards: `https://site.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{id}/bio` → `awards[]` with `name`, `league`, `displayCount`, `seasons`.
+- `site.web.api.espn.com` and `sports.core.api.espn.com` return 403 through the worker; `site.web` kept only as a backup host.
+- ESPN's award list can be incomplete (e.g. missing championships / All-Star picks for some players).
+- Photo: existing `headshotUrl()`. Cache per player ID in a `Map`.
 
 ## Code changes
 - `index.html`: empty `<dialog id="player-card">` container.

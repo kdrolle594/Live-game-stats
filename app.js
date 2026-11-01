@@ -27,7 +27,6 @@ const ESPN_ATHLETE_HOSTS = [
     'https://site.api.espn.com/apis/common/v3/sports/basketball/nba/athletes',
     'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes'
 ];
-const ESPN_CORE_ATHLETE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes';
 
 // Season table columns: label shown -> ESPN stat labels to look for
 const SEASON_COLS = [
@@ -47,22 +46,25 @@ const SEASON_COLS = [
 // Matched against ESPN award names; anything unmatched is dropped.
 const AWARDS = [
     { label: 'MVP', test: /^(nba )?(most valuable player|mvp)$/i },
-    { label: 'Champion', test: /champion/i },
-    { label: 'Finals MVP', test: /finals (mvp|most valuable)/i },
+    { label: 'Champion', test: /^(nba )?champion/i },
+    { label: 'Finals MVP', test: /^(nba )?finals mvp$/i },
     { label: 'DPOY', test: /defensive player of the year/i },
     { label: 'All-NBA 1st', test: /all-nba (1st|first)/i },
     { label: 'All-NBA 2nd', test: /all-nba (2nd|second)/i },
     { label: 'All-NBA 3rd', test: /all-nba (3rd|third)/i },
-    { label: 'All-NBA', test: /all-nba/i },
+    { label: 'All-NBA', test: /^all-nba/i },
     { label: 'All-Defensive 1st', test: /all-defensive (1st|first)/i },
     { label: 'All-Defensive 2nd', test: /all-defensive (2nd|second)/i },
-    { label: 'All-Defensive', test: /all-defensive/i },
-    { label: 'All-Star', test: /all-star/i },
+    { label: 'All-Defensive', test: /^all-defensive/i },
+    { label: 'All-Star', test: /^(nba )?all-star( selection)?$/i },
     { label: 'Rookie of the Year', test: /rookie of the year/i },
     { label: 'Most Improved', test: /most improved/i },
     { label: 'Sixth Man', test: /sixth man/i },
-    { label: 'Clutch Player', test: /clutch/i },
-    { label: 'All-Rookie', test: /all-rookie/i }
+    { label: 'Clutch Player', test: /clutch player/i },
+    { label: 'All-Star MVP', test: /all-star (game )?mvp/i },
+    { label: 'Conf. Finals MVP', test: /conference finals mvp/i },
+    { label: 'All-Rookie 1st', test: /all-rookie (1st|first)/i },
+    { label: 'All-Rookie 2nd', test: /all-rookie (2nd|second)/i }
 ];
 
 class NBAApp {
@@ -716,33 +718,34 @@ class NBAApp {
         return { seasons, career };
     }
 
-    // ESPN core API returns a list of award refs; each ref is fetched for its name.
+    // ESPN bio lists awards already counted: { name, league, displayCount: "5x", seasons: ["2025", ...] }
     async fetchPlayerAwards(id) {
-        const list = await this.fetchJson(`${ESPN_CORE_ATHLETE}/${id}/awards?limit=200`);
-        const items = list?.items || [];
-
-        // Fetch refs a few at a time to stay polite to the proxy
-        const details = [];
-        for (let i = 0; i < items.length; i += 8) {
-            const chunk = items.slice(i, i + 8).map(item =>
-                item.name ? Promise.resolve(item) : this.fetchJson(item.$ref).catch(() => null));
-            details.push(...await Promise.all(chunk));
+        const reasons = [];
+        for (const host of ESPN_ATHLETE_HOSTS) {
+            try {
+                const bio = await this.fetchJson(`${host}/${id}/bio`);
+                return this.groupAwards(bio?.awards || []);
+            } catch (err) {
+                reasons.push(err.message);
+            }
         }
-        return this.groupAwards(details.filter(Boolean));
+        throw new Error(reasons.join('; '));
     }
 
     // Group raw awards into { label, count, years } in prestige order
     groupAwards(awards) {
         const groups = new Map();
         for (const a of awards) {
-            const name = a.name || a.displayName || '';
+            if (a.league && a.league !== 'nba') continue; // skip college awards
+            const name = a.name || '';
             if (/runner-up|runner up|finalist/i.test(name)) continue;
             const match = AWARDS.find(def => def.test.test(name));
             if (!match) continue;
+            const years = (a.seasons || []).map(Number).filter(Boolean);
+            const count = parseInt(a.displayCount, 10) || years.length || 1;
             const g = groups.get(match.label) || { label: match.label, count: 0, years: [] };
-            g.count += 1;
-            const year = a.season?.year || (a.season?.$ref || '').match(/seasons\/(\d{4})/)?.[1];
-            if (year) g.years.push(Number(year));
+            g.count += count;
+            g.years.push(...years);
             groups.set(match.label, g);
         }
         const order = AWARDS.map(d => d.label);
