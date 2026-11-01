@@ -911,6 +911,7 @@ td.tops {
 }
 
 .pc-error {
+    overflow-wrap: anywhere;
     color: var(--steel);
 }
 

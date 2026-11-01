@@ -631,11 +631,11 @@ class NBAApp {
     loadPlayerData(id) {
         if (!this.playerCache.has(id)) {
             const job = Promise.all([
-                this.fetchPlayerStats(id).catch(err => { console.error('Player stats', err); return null; }),
-                this.fetchPlayerAwards(id).catch(err => { console.error('Player awards', err); return null; })
+                this.fetchPlayerStats(id).catch(err => { console.error('Player stats', err); return { error: err.message }; }),
+                this.fetchPlayerAwards(id).catch(err => { console.error('Player awards', err); return { error: err.message }; })
             ]).then(([stats, awards]) => {
                 // Don't cache failures, so reopening retries
-                if (!stats || !awards) this.playerCache.delete(id);
+                if (stats.error || awards.error) this.playerCache.delete(id);
                 return { stats, awards };
             });
             this.playerCache.set(id, job);
@@ -643,10 +643,24 @@ class NBAApp {
         return this.playerCache.get(id);
     }
 
+    // Try the worker proxy first, then ESPN directly (these ESPN APIs allow
+    // browser requests). Throws with both reasons if neither works.
     async fetchJson(url) {
-        const res = await fetch(this.proxied(url));
-        if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-        return res.json();
+        url = url.replace(/^http:\/\//, 'https://');
+        const attempt = async (target, via) => {
+            try {
+                const res = await fetch(target);
+                if (!res.ok) return { reason: `${via}: HTTP ${res.status}` };
+                return { data: await res.json() };
+            } catch (err) {
+                return { reason: `${via}: ${err.message}` };
+            }
+        };
+        const proxied = await attempt(this.proxied(url), 'proxy');
+        if ('data' in proxied) return proxied.data;
+        const direct = await attempt(url, 'direct');
+        if ('data' in direct) return direct.data;
+        throw new Error(`${proxied.reason}; ${direct.reason}`);
     }
 
     async fetchPlayerStats(id) {
@@ -758,8 +772,8 @@ class NBAApp {
     }
 
     awardsHtml(awards) {
-        if (awards === null) {
-            return `<p class="pc-error">Accolades didn’t load. Close the card and open it again to retry.</p>`;
+        if (awards.error) {
+            return `<p class="pc-error">Accolades didn’t load (${this.escape(awards.error)}). Close the card and open it again to retry.</p>`;
         }
         if (!awards.length) return '';
         const banners = awards.map(a => {
@@ -778,8 +792,8 @@ class NBAApp {
     }
 
     seasonsHtml(stats) {
-        if (stats === null) {
-            return `<p class="pc-error">Season stats didn’t load. Close the card and open it again to retry.</p>`;
+        if (stats.error) {
+            return `<p class="pc-error">Season stats didn’t load (${this.escape(stats.error)}). Close the card and open it again to retry.</p>`;
         }
         if (!stats.seasons.length) {
             return `<p class="pc-error">No season stats yet for this player.</p>`;
