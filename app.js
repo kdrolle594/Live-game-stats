@@ -22,7 +22,11 @@ const TEAM_STATS = [
 ];
 
 const ESPN_BASE = 'http://site.api.espn.com/apis/site/v2/sports/basketball/nba';
-const ESPN_ATHLETE = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes';
+// Same athlete API on two hosts; site.api is the one the scoreboard already uses
+const ESPN_ATHLETE_HOSTS = [
+    'https://site.api.espn.com/apis/common/v3/sports/basketball/nba/athletes',
+    'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes'
+];
 const ESPN_CORE_ATHLETE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes';
 
 // Season table columns: label shown -> ESPN stat labels to look for
@@ -664,8 +668,15 @@ class NBAApp {
     }
 
     async fetchPlayerStats(id) {
-        const data = await this.fetchJson(`${ESPN_ATHLETE}/${id}/stats`);
-        return this.parseSeasons(data);
+        const reasons = [];
+        for (const host of ESPN_ATHLETE_HOSTS) {
+            try {
+                return this.parseSeasons(await this.fetchJson(`${host}/${id}/stats`));
+            } catch (err) {
+                reasons.push(err.message);
+            }
+        }
+        throw new Error(reasons.join('; '));
     }
 
     // ESPN shape: categories[] with labels[] and statistics[] (one per season),
