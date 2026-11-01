@@ -22,8 +22,11 @@ const TEAM_STATS = [
 ];
 
 const ESPN_BASE = 'http://site.api.espn.com/apis/site/v2/sports/basketball/nba';
-const ESPN_ATHLETE = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes';
-const ESPN_CORE_ATHLETE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes';
+// Same athlete API on two hosts; site.api is the one the scoreboard already uses
+const ESPN_ATHLETE_HOSTS = [
+    'https://site.api.espn.com/apis/common/v3/sports/basketball/nba/athletes',
+    'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes'
+];
 
 // Season table columns: label shown -> ESPN stat labels to look for
 const SEASON_COLS = [
@@ -39,26 +42,43 @@ const SEASON_COLS = [
     { label: 'FT%', keys: ['FT%'] }
 ];
 
+// NBA champion per season (season end year -> ESPN team id).
+// ESPN team ids follow the franchise through moves (e.g. Seattle -> OKC is 25).
+// Add a line each June after the Finals.
+const CHAMPIONS = {
+    1950: 13, 1951: 23, 1952: 13, 1953: 13, 1954: 13, 1955: 20, 1956: 9, 1957: 2, 1958: 1, 1959: 2,
+    1960: 2, 1961: 2, 1962: 2, 1963: 2, 1964: 2, 1965: 2, 1966: 2, 1967: 20, 1968: 2, 1969: 2,
+    1970: 18, 1971: 15, 1972: 13, 1973: 18, 1974: 2, 1975: 9, 1976: 2, 1977: 22, 1978: 27, 1979: 25,
+    1980: 13, 1981: 2, 1982: 13, 1983: 20, 1984: 2, 1985: 13, 1986: 2, 1987: 13, 1988: 13, 1989: 8,
+    1990: 8, 1991: 4, 1992: 4, 1993: 4, 1994: 10, 1995: 10, 1996: 4, 1997: 4, 1998: 4, 1999: 24,
+    2000: 13, 2001: 13, 2002: 13, 2003: 24, 2004: 8, 2005: 24, 2006: 14, 2007: 24, 2008: 2, 2009: 13,
+    2010: 13, 2011: 6, 2012: 14, 2013: 14, 2014: 24, 2015: 9, 2016: 5, 2017: 9, 2018: 9, 2019: 28,
+    2020: 13, 2021: 15, 2022: 9, 2023: 7, 2024: 2, 2025: 25
+};
+
 // Awards shown on the player card, most prestigious first.
 // Matched against ESPN award names; anything unmatched is dropped.
 const AWARDS = [
     { label: 'MVP', test: /^(nba )?(most valuable player|mvp)$/i },
-    { label: 'Champion', test: /champion/i },
-    { label: 'Finals MVP', test: /finals (mvp|most valuable)/i },
+    { label: 'Champion', test: /^(nba )?champion/i },
+    { label: 'Finals MVP', test: /^(nba )?finals mvp$/i },
     { label: 'DPOY', test: /defensive player of the year/i },
     { label: 'All-NBA 1st', test: /all-nba (1st|first)/i },
     { label: 'All-NBA 2nd', test: /all-nba (2nd|second)/i },
     { label: 'All-NBA 3rd', test: /all-nba (3rd|third)/i },
-    { label: 'All-NBA', test: /all-nba/i },
+    { label: 'All-NBA', test: /^all-nba/i },
     { label: 'All-Defensive 1st', test: /all-defensive (1st|first)/i },
     { label: 'All-Defensive 2nd', test: /all-defensive (2nd|second)/i },
-    { label: 'All-Defensive', test: /all-defensive/i },
-    { label: 'All-Star', test: /all-star/i },
+    { label: 'All-Defensive', test: /^all-defensive/i },
+    { label: 'All-Star', test: /^(nba )?all-star( selection)?$/i },
     { label: 'Rookie of the Year', test: /rookie of the year/i },
     { label: 'Most Improved', test: /most improved/i },
     { label: 'Sixth Man', test: /sixth man/i },
-    { label: 'Clutch Player', test: /clutch/i },
-    { label: 'All-Rookie', test: /all-rookie/i }
+    { label: 'Clutch Player', test: /clutch player/i },
+    { label: 'All-Star MVP', test: /all-star (game )?mvp/i },
+    { label: 'Conf. Finals MVP', test: /conference finals mvp/i },
+    { label: 'All-Rookie 1st', test: /all-rookie (1st|first)/i },
+    { label: 'All-Rookie 2nd', test: /all-rookie (2nd|second)/i }
 ];
 
 class NBAApp {
@@ -631,11 +651,11 @@ class NBAApp {
     loadPlayerData(id) {
         if (!this.playerCache.has(id)) {
             const job = Promise.all([
-                this.fetchPlayerStats(id).catch(err => { console.error('Player stats', err); return null; }),
-                this.fetchPlayerAwards(id).catch(err => { console.error('Player awards', err); return null; })
+                this.fetchPlayerStats(id).catch(err => { console.error('Player stats', err); return { error: err.message }; }),
+                this.fetchPlayerAwards(id).catch(err => { console.error('Player awards', err); return { error: err.message }; })
             ]).then(([stats, awards]) => {
                 // Don't cache failures, so reopening retries
-                if (!stats || !awards) this.playerCache.delete(id);
+                if (stats.error || awards.error) this.playerCache.delete(id);
                 return { stats, awards };
             });
             this.playerCache.set(id, job);
@@ -643,15 +663,41 @@ class NBAApp {
         return this.playerCache.get(id);
     }
 
+    // Try the worker proxy first, then ESPN directly (these ESPN APIs allow
+    // browser requests). Throws with both reasons if neither works.
     async fetchJson(url) {
-        const res = await fetch(this.proxied(url));
-        if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-        return res.json();
+        url = url.replace(/^http:\/\//, 'https://');
+        const attempt = async (target, via) => {
+            try {
+                const res = await fetch(target);
+                if (!res.ok) return { reason: `${via}: HTTP ${res.status}` };
+                return { data: await res.json() };
+            } catch (err) {
+                return { reason: `${via}: ${err.message}` };
+            }
+        };
+        const proxied = await attempt(this.proxied(url), 'proxy');
+        if ('data' in proxied) return proxied.data;
+        const direct = await attempt(url, 'direct');
+        if ('data' in direct) return direct.data;
+        throw new Error(`${proxied.reason}; ${direct.reason}`);
+    }
+
+    // Fetch an athlete path from the first ESPN host that answers
+    async fetchAthlete(id, path) {
+        const reasons = [];
+        for (const host of ESPN_ATHLETE_HOSTS) {
+            try {
+                return await this.fetchJson(`${host}/${id}/${path}`);
+            } catch (err) {
+                reasons.push(err.message);
+            }
+        }
+        throw new Error(reasons.join('; '));
     }
 
     async fetchPlayerStats(id) {
-        const data = await this.fetchJson(`${ESPN_ATHLETE}/${id}/stats`);
-        return this.parseSeasons(data);
+        return this.parseSeasons(await this.fetchAthlete(id, 'stats'));
     }
 
     // ESPN shape: categories[] with labels[] and statistics[] (one per season),
@@ -674,12 +720,15 @@ class NBAApp {
             return row;
         };
 
+        // ESPN keys teams by slug (e.g. "golden-state-warriors"); match by slug or id
+        const teamList = Object.values(teams);
         const seasons = (cat.statistics || []).map(s => {
-            const t = teams[s.teamId] || {};
+            const t = teams[s.teamSlug] || teams[s.teamId]
+                || teamList.find(x => String(x.id) === String(s.teamId)) || {};
             return {
                 year: s.season?.year ?? 0,
                 season: s.season?.displayName || String(s.season?.year || ''),
-                team: s.teamSlug && !t.abbreviation ? s.teamSlug.toUpperCase().slice(0, 4) : (t.abbreviation || ''),
+                team: t.abbreviation || '',
                 stats: pick(s.stats)
             };
         }).sort((a, b) => b.year - a.year);
@@ -688,33 +737,52 @@ class NBAApp {
         return { seasons, career };
     }
 
-    // ESPN core API returns a list of award refs; each ref is fetched for its name.
+    // ESPN bio lists awards already counted: { name, league, displayCount: "5x", seasons: ["2025", ...] }
+    // It often misses titles, so championships are also worked out from playoff stats.
     async fetchPlayerAwards(id) {
-        const list = await this.fetchJson(`${ESPN_CORE_ATHLETE}/${id}/awards?limit=200`);
-        const items = list?.items || [];
-
-        // Fetch refs a few at a time to stay polite to the proxy
-        const details = [];
-        for (let i = 0; i < items.length; i += 8) {
-            const chunk = items.slice(i, i + 8).map(item =>
-                item.name ? Promise.resolve(item) : this.fetchJson(item.$ref).catch(() => null));
-            details.push(...await Promise.all(chunk));
+        const [bio, playoffs] = await Promise.all([
+            this.fetchAthlete(id, 'bio'),
+            this.fetchAthlete(id, 'stats?seasontype=3').catch(err => {
+                console.error('Player playoff stats', err);
+                return null;
+            })
+        ]);
+        const isTitle = a => /^(nba )?champion/i.test(a.name || '');
+        const awards = (bio?.awards || []).filter(a => !isTitle(a));
+        const titleYears = new Set((bio?.awards || []).filter(isTitle).flatMap(a => (a.seasons || []).map(Number)));
+        for (const year of this.championshipYears(playoffs)) titleYears.add(year);
+        if (titleYears.size) {
+            awards.push({ name: 'NBA Champion', league: 'nba', displayCount: `${titleYears.size}x`, seasons: [...titleYears] });
         }
-        return this.groupAwards(details.filter(Boolean));
+        return this.groupAwards(awards);
+    }
+
+    // Seasons where the player appeared in the playoffs for that year's champion
+    championshipYears(playoffs) {
+        const years = [];
+        for (const cat of playoffs?.categories || []) {
+            for (const s of cat.statistics || []) {
+                const year = s.season?.year;
+                if (year && CHAMPIONS[year] === Number(s.teamId)) years.push(year);
+            }
+        }
+        return [...new Set(years)];
     }
 
     // Group raw awards into { label, count, years } in prestige order
     groupAwards(awards) {
         const groups = new Map();
         for (const a of awards) {
-            const name = a.name || a.displayName || '';
+            if (a.league && a.league !== 'nba') continue; // skip college awards
+            const name = a.name || '';
             if (/runner-up|runner up|finalist/i.test(name)) continue;
             const match = AWARDS.find(def => def.test.test(name));
             if (!match) continue;
+            const years = (a.seasons || []).map(Number).filter(Boolean);
+            const count = parseInt(a.displayCount, 10) || years.length || 1;
             const g = groups.get(match.label) || { label: match.label, count: 0, years: [] };
-            g.count += 1;
-            const year = a.season?.year || (a.season?.$ref || '').match(/seasons\/(\d{4})/)?.[1];
-            if (year) g.years.push(Number(year));
+            g.count += count;
+            g.years.push(...years);
             groups.set(match.label, g);
         }
         const order = AWARDS.map(d => d.label);
@@ -758,8 +826,8 @@ class NBAApp {
     }
 
     awardsHtml(awards) {
-        if (awards === null) {
-            return `<p class="pc-error">Accolades didn’t load. Close the card and open it again to retry.</p>`;
+        if (awards.error) {
+            return `<p class="pc-error">Accolades didn’t load (${this.escape(awards.error)}). Close the card and open it again to retry.</p>`;
         }
         if (!awards.length) return '';
         const banners = awards.map(a => {
@@ -778,8 +846,8 @@ class NBAApp {
     }
 
     seasonsHtml(stats) {
-        if (stats === null) {
-            return `<p class="pc-error">Season stats didn’t load. Close the card and open it again to retry.</p>`;
+        if (stats.error) {
+            return `<p class="pc-error">Season stats didn’t load (${this.escape(stats.error)}). Close the card and open it again to retry.</p>`;
         }
         if (!stats.seasons.length) {
             return `<p class="pc-error">No season stats yet for this player.</p>`;
