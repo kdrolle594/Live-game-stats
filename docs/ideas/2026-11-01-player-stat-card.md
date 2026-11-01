@@ -17,6 +17,8 @@ Click a player name in the box score → modal stat card with photo, season-by-s
 - Awards: `https://site.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{id}/bio` → `awards[]` with `name`, `league`, `displayCount`, `seasons`.
 - `site.web.api.espn.com` and `sports.core.api.espn.com` return 403 through the worker; `site.web` kept only as a backup host.
 - ESPN's award list can be incomplete (e.g. missing championships / All-Star picks for some players).
+- Championships: derived from playoff stats (`/stats?seasontype=3`) + `CHAMPIONS` map (season end year -> ESPN team id) in `app.js`. Add a line each June.
+- All-Star selections: no reliable free source found (ESPN bio and Wikidata both incomplete). Not shown unless ESPN lists them.
 - Photo: existing `headshotUrl()`. Cache per player ID in a `Map`.
 
 ## Code changes

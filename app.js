@@ -42,6 +42,20 @@ const SEASON_COLS = [
     { label: 'FT%', keys: ['FT%'] }
 ];
 
+// NBA champion per season (season end year -> ESPN team id).
+// ESPN team ids follow the franchise through moves (e.g. Seattle -> OKC is 25).
+// Add a line each June after the Finals.
+const CHAMPIONS = {
+    1950: 13, 1951: 23, 1952: 13, 1953: 13, 1954: 13, 1955: 20, 1956: 9, 1957: 2, 1958: 1, 1959: 2,
+    1960: 2, 1961: 2, 1962: 2, 1963: 2, 1964: 2, 1965: 2, 1966: 2, 1967: 20, 1968: 2, 1969: 2,
+    1970: 18, 1971: 15, 1972: 13, 1973: 18, 1974: 2, 1975: 9, 1976: 2, 1977: 22, 1978: 27, 1979: 25,
+    1980: 13, 1981: 2, 1982: 13, 1983: 20, 1984: 2, 1985: 13, 1986: 2, 1987: 13, 1988: 13, 1989: 8,
+    1990: 8, 1991: 4, 1992: 4, 1993: 4, 1994: 10, 1995: 10, 1996: 4, 1997: 4, 1998: 4, 1999: 24,
+    2000: 13, 2001: 13, 2002: 13, 2003: 24, 2004: 8, 2005: 24, 2006: 14, 2007: 24, 2008: 2, 2009: 13,
+    2010: 13, 2011: 6, 2012: 14, 2013: 14, 2014: 24, 2015: 9, 2016: 5, 2017: 9, 2018: 9, 2019: 28,
+    2020: 13, 2021: 15, 2022: 9, 2023: 7, 2024: 2, 2025: 25
+};
+
 // Awards shown on the player card, most prestigious first.
 // Matched against ESPN award names; anything unmatched is dropped.
 const AWARDS = [
@@ -669,16 +683,21 @@ class NBAApp {
         throw new Error(`${proxied.reason}; ${direct.reason}`);
     }
 
-    async fetchPlayerStats(id) {
+    // Fetch an athlete path from the first ESPN host that answers
+    async fetchAthlete(id, path) {
         const reasons = [];
         for (const host of ESPN_ATHLETE_HOSTS) {
             try {
-                return this.parseSeasons(await this.fetchJson(`${host}/${id}/stats`));
+                return await this.fetchJson(`${host}/${id}/${path}`);
             } catch (err) {
                 reasons.push(err.message);
             }
         }
         throw new Error(reasons.join('; '));
+    }
+
+    async fetchPlayerStats(id) {
+        return this.parseSeasons(await this.fetchAthlete(id, 'stats'));
     }
 
     // ESPN shape: categories[] with labels[] and statistics[] (one per season),
@@ -719,17 +738,35 @@ class NBAApp {
     }
 
     // ESPN bio lists awards already counted: { name, league, displayCount: "5x", seasons: ["2025", ...] }
+    // It often misses titles, so championships are also worked out from playoff stats.
     async fetchPlayerAwards(id) {
-        const reasons = [];
-        for (const host of ESPN_ATHLETE_HOSTS) {
-            try {
-                const bio = await this.fetchJson(`${host}/${id}/bio`);
-                return this.groupAwards(bio?.awards || []);
-            } catch (err) {
-                reasons.push(err.message);
+        const [bio, playoffs] = await Promise.all([
+            this.fetchAthlete(id, 'bio'),
+            this.fetchAthlete(id, 'stats?seasontype=3').catch(err => {
+                console.error('Player playoff stats', err);
+                return null;
+            })
+        ]);
+        const isTitle = a => /^(nba )?champion/i.test(a.name || '');
+        const awards = (bio?.awards || []).filter(a => !isTitle(a));
+        const titleYears = new Set((bio?.awards || []).filter(isTitle).flatMap(a => (a.seasons || []).map(Number)));
+        for (const year of this.championshipYears(playoffs)) titleYears.add(year);
+        if (titleYears.size) {
+            awards.push({ name: 'NBA Champion', league: 'nba', displayCount: `${titleYears.size}x`, seasons: [...titleYears] });
+        }
+        return this.groupAwards(awards);
+    }
+
+    // Seasons where the player appeared in the playoffs for that year's champion
+    championshipYears(playoffs) {
+        const years = [];
+        for (const cat of playoffs?.categories || []) {
+            for (const s of cat.statistics || []) {
+                const year = s.season?.year;
+                if (year && CHAMPIONS[year] === Number(s.teamId)) years.push(year);
             }
         }
-        throw new Error(reasons.join('; '));
+        return [...new Set(years)];
     }
 
     // Group raw awards into { label, count, years } in prestige order
