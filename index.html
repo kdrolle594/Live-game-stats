@@ -17,14 +17,18 @@
     <link rel="stylesheet" href="style.css">
 </head>
 
-<body>
+<body data-view="scores">
     <div class="app-container">
         <header class="main-header">
             <div class="logo">
                 <i class="fa-solid fa-basketball" aria-hidden="true"></i>
                 <h1>NBA Live Hub</h1>
             </div>
-            <div class="date-navigator">
+            <nav class="view-tabs" role="tablist" aria-label="View">
+                <button type="button" class="view-tab" role="tab" id="tab-scores" data-view="scores" aria-controls="scores-view" aria-selected="true">Scores</button>
+                <button type="button" class="view-tab" role="tab" id="tab-standings" data-view="standings" aria-controls="standings" aria-selected="false" tabindex="-1">Standings</button>
+            </nav>
+            <div class="date-navigator scores-only">
                 <button id="prev-day" class="nav-btn" aria-label="Previous day"><i
                         class="fa-solid fa-chevron-left"></i></button>
                 <label class="date-display">
@@ -35,13 +39,14 @@
                         class="fa-solid fa-chevron-right"></i></button>
             </div>
             <div class="header-actions">
-                <button id="today-btn" class="text-btn">Today</button>
-                <button id="refresh-btn" class="icon-btn" aria-label="Refresh scores">
+                <button id="today-btn" class="text-btn scores-only">Today</button>
+                <button id="refresh-btn" class="icon-btn" aria-label="Refresh">
                     <i class="fa-solid fa-rotate-right"></i>
                 </button>
             </div>
         </header>
 
+        <div id="scores-view" class="view-panel scores-only" role="tabpanel" aria-labelledby="tab-scores">
         <section id="top-performers" class="top-performers" aria-labelledby="top-title" hidden>
             <h2 id="top-title" class="section-title">Top performers</h2>
             <ol id="top-list" class="top-list"></ol>
@@ -55,6 +60,12 @@
                     <p>Loading games…</p>
                 </div>
             </div>
+        </section>
+        </div>
+
+        <section id="standings" class="view-panel standings-only" role="tabpanel" aria-labelledby="tab-standings">
+            <h2 class="sr-only">Standings</h2>
+            <div id="standings-body" class="standings-body" aria-live="polite"></div>
         </section>
 
         <footer class="main-footer">

@@ -927,6 +927,177 @@ td.tops {
     border-radius: 8px;
 }
 
+/* View tabs */
+body[data-view="standings"] .scores-only,
+body[data-view="scores"] .standings-only {
+    display: none !important;
+}
+
+.view-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.view-tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 4px;
+    border-radius: 8px;
+}
+
+.view-tab {
+    background: transparent;
+    border: none;
+    color: var(--steel);
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.view-tab:hover {
+    color: var(--chalk);
+}
+
+.view-tab[aria-selected="true"] {
+    background: var(--panel-2);
+    color: var(--amber);
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* Standings */
+.standings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.standings-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.standings-conf {
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    font-weight: 700;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.standings-scroll {
+    overflow-x: auto;
+}
+
+.standings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.standings-table th,
+.standings-table td {
+    padding: 8px 10px;
+    text-align: center;
+}
+
+.standings-table thead th {
+    color: var(--steel);
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--line);
+}
+
+.standings-table abbr {
+    text-decoration: none;
+    cursor: help;
+}
+
+.standings-table tbody tr + tr {
+    border-top: 1px solid var(--line);
+}
+
+.standings-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.standings-table tbody tr:hover .st-team {
+    background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)), var(--panel);
+}
+
+.standings-table .st-seed {
+    color: var(--steel);
+    width: 32px;
+}
+
+/* Team column stays put while the rest scrolls on phone */
+.standings-table .st-team {
+    position: sticky;
+    left: 0;
+    background: var(--panel);
+    text-align: left;
+    font-weight: 600;
+    min-width: 150px;
+}
+
+.standings-table tbody .st-team {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.st-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.standings-table td.pos { color: #4CC38A; }
+.standings-table td.neg { color: #F07476; }
+
+.standings-table tr.cut-playoff { border-bottom: 2px solid var(--amber); }
+.standings-table tr.cut-playin { border-bottom: 2px dashed var(--steel); }
+
+.standings-key {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--steel);
+    font-size: 0.9rem;
+}
+
+.key-line {
+    display: inline-block;
+    width: 22px;
+    margin-left: 8px;
+}
+
+.key-line:first-child { margin-left: 0; }
+.key-line.playoff { border-top: 2px solid var(--amber); }
+.key-line.playin { border-top: 2px dashed var(--steel); }
+
 /* Loading / empty */
 .loading-state {
     grid-column: 1 / -1;
@@ -1000,9 +1171,31 @@ td.tops {
     }
 
     .date-navigator {
-        order: 3;
+        order: 4;
         width: 100%;
         justify-content: space-between;
+    }
+
+    .view-tabs {
+        order: 3;
+        width: 100%;
+    }
+
+    .view-tab {
+        flex: 1;
+    }
+
+    .view-panel {
+        gap: 24px;
+    }
+
+    .standings-table th,
+    .standings-table td {
+        padding: 8px 8px;
+    }
+
+    .standings-table .st-team {
+        min-width: 120px;
     }
 
     .games-grid {

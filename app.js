@@ -28,6 +28,26 @@ const ESPN_ATHLETE_HOSTS = [
     'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes'
 ];
 
+const STANDINGS_URL = 'https://site.api.espn.com/apis/v2/sports/basketball/nba/standings';
+const STANDINGS_TTL = 5 * 60 * 1000; // keep standings 5 min before refetching
+const VIEW_KEY = 'nbaLiveHub.view';
+
+// Standings columns: key on the normalized row, header label, full name for the tooltip
+const STANDINGS_COLS = [
+    { key: 'w', label: 'W', title: 'Wins' },
+    { key: 'l', label: 'L', title: 'Losses' },
+    { key: 'pct', label: 'PCT', title: 'Win percentage' },
+    { key: 'gb', label: 'GB', title: 'Games behind' },
+    { key: 'home', label: 'Home', title: 'Home record' },
+    { key: 'away', label: 'Away', title: 'Away record' },
+    { key: 'conf', label: 'Conf', title: 'Record vs. conference' },
+    { key: 'l10', label: 'L10', title: 'Last 10 games' },
+    { key: 'streak', label: 'Strk', title: 'Current streak' },
+    { key: 'ppg', label: 'PPG', title: 'Points per game' },
+    { key: 'oppg', label: 'OPP', title: 'Opponent points per game' },
+    { key: 'diff', label: 'Diff', title: 'Point differential per game' }
+];
+
 // Season table columns: label shown -> ESPN stat labels to look for
 const SEASON_COLS = [
     { label: 'GP', keys: ['GP'] },
@@ -89,6 +109,10 @@ class NBAApp {
         this.refreshIntervalId = null;
         this.openPlayerId = null;
         this.playerCache = new Map();
+        this.view = 'scores';
+        this.gamesLoaded = false;
+        this.standings = null; // { conferences, at }
+        this.standingsJob = null;
         this.liveProxyBase = 'https://winter-sky-692e.kdrolle594.workers.dev/?url=';
 
         this.dom = {
@@ -107,7 +131,9 @@ class NBAApp {
             dialogTitle: document.getElementById('dialog-title'),
             dialogBody: document.getElementById('dialog-body'),
             playerDialog: document.getElementById('player-dialog'),
-            playerBody: document.getElementById('player-body')
+            playerBody: document.getElementById('player-body'),
+            tabs: document.querySelectorAll('.view-tab'),
+            standingsBody: document.getElementById('standings-body')
         };
 
         this.init();
@@ -115,11 +141,11 @@ class NBAApp {
 
     init() {
         this.setupEventListeners();
-        this.loadGames();
+        this.setView(this.savedView());
 
-        // Auto-refresh every 30s if viewing today
+        // Auto-refresh every 30s if viewing today's scores
         this.refreshIntervalId = setInterval(() => {
-            if (this.isToday(this.currentDate)) {
+            if (this.view === 'scores' && this.isToday(this.currentDate)) {
                 this.loadGames(true); // silent refresh
             }
         }, 30000);
@@ -137,7 +163,8 @@ class NBAApp {
 
         refreshBtn?.addEventListener('click', () => {
             refreshBtn.classList.add('spinning');
-            this.loadGames().finally(() => {
+            const job = this.view === 'standings' ? this.loadStandings(true) : this.loadGames();
+            job.finally(() => {
                 setTimeout(() => refreshBtn.classList.remove('spinning'), 500);
             });
         });
@@ -148,6 +175,22 @@ class NBAApp {
                 this.currentDate = new Date(e.target.value + 'T12:00:00');
                 this.loadGames();
             }
+        });
+
+        this.dom.tabs.forEach(tab => {
+            tab.addEventListener('click', () => this.setView(tab.dataset.view));
+            // Arrow keys move between tabs
+            tab.addEventListener('keydown', (e) => {
+                if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                const tabs = [...this.dom.tabs];
+                const next = tabs[(tabs.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+                next.focus();
+                this.setView(next.dataset.view);
+            });
+        });
+
+        this.dom.standingsBody?.addEventListener('click', (e) => {
+            if (e.target.closest('.standings-retry')) this.loadStandings(true);
         });
 
         grid?.addEventListener('click', (e) => {
@@ -203,6 +246,7 @@ class NBAApp {
     }
 
     async loadGames(silent = false) {
+        this.gamesLoaded = true;
         if (!silent) {
             this.updateDateDisplay();
             if (this.dom.grid) {
@@ -874,6 +918,189 @@ class NBAApp {
                     </table>
                 </div>
             </section>`;
+    }
+
+    // ---- Views (Scores | Standings) ----
+
+    savedView() {
+        try {
+            return localStorage.getItem(VIEW_KEY) === 'standings' ? 'standings' : 'scores';
+        } catch {
+            return 'scores';
+        }
+    }
+
+    setView(view) {
+        this.view = view === 'standings' ? 'standings' : 'scores';
+        document.body.dataset.view = this.view;
+        this.dom.tabs.forEach(tab => {
+            const on = tab.dataset.view === this.view;
+            tab.setAttribute('aria-selected', String(on));
+            tab.tabIndex = on ? 0 : -1;
+        });
+        try { localStorage.setItem(VIEW_KEY, this.view); } catch { /* storage blocked */ }
+
+        if (this.view === 'standings') {
+            this.loadStandings();
+        } else if (!this.gamesLoaded) {
+            this.loadGames();
+        } else if (this.isToday(this.currentDate)) {
+            this.loadGames(true); // catch up on scores missed while away
+        }
+    }
+
+    // ---- Standings ----
+
+    async loadStandings(force = false) {
+        const body = this.dom.standingsBody;
+        if (!body) return;
+        const fresh = this.standings && Date.now() - this.standings.at < STANDINGS_TTL;
+        if (fresh && !force) {
+            this.renderStandings();
+            return;
+        }
+        if (this.standingsJob) return this.standingsJob;
+
+        if (!this.standings) {
+            body.innerHTML = `
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading standings…</p>
+                </div>`;
+        }
+        this.standingsJob = (async () => {
+            try {
+                const conferences = this.normalizeStandings(await this.fetchJson(STANDINGS_URL));
+                if (!conferences.length) throw new Error('No standings in response');
+                this.standings = { conferences, at: Date.now() };
+                this.renderStandings();
+            } catch (err) {
+                console.error('Error loading standings:', err);
+                if (this.standings) {
+                    this.showToast('Couldn’t refresh standings. Showing the last copy.');
+                } else {
+                    body.innerHTML = `
+                        <div class="loading-state">
+                            <p>Couldn’t load standings.</p>
+                            <button type="button" class="text-btn standings-retry">Retry</button>
+                        </div>`;
+                }
+            } finally {
+                this.standingsJob = null;
+            }
+        })();
+        return this.standingsJob;
+    }
+
+    normalizeStandings(data) {
+        const groups = Array.isArray(data?.children) ? data.children : [];
+        return groups.map(group => {
+            const rows = (group.standings?.entries || []).map(entry => this.standingsRow(entry));
+            const seeded = rows.length > 0 && rows.every(r => r.seed > 0);
+            rows.sort((a, b) => seeded
+                ? a.seed - b.seed
+                : (b.pctValue - a.pctValue) || (b.wins - a.wins) || a.name.localeCompare(b.name));
+            return {
+                name: group.name || group.abbreviation || 'Conference',
+                rows
+            };
+        }).filter(c => c.rows.length);
+    }
+
+    standingsRow(entry) {
+        const team = entry.team || {};
+        const stats = Array.isArray(entry.stats) ? entry.stats : [];
+        // Match a stat by name, type or abbreviation (ESPN uses all three)
+        const stat = (...keys) => {
+            const want = keys.map(k => k.toLowerCase());
+            return stats.find(s => [s.name, s.type, s.abbreviation]
+                .some(v => v && want.includes(String(v).toLowerCase())));
+        };
+        const num = (...keys) => {
+            const v = Number(stat(...keys)?.value);
+            return Number.isFinite(v) ? v : null;
+        };
+        const text = (...keys) => {
+            const s = stat(...keys);
+            const v = s?.summary ?? s?.displayValue;
+            return v === undefined || v === null || v === '' ? null : String(v);
+        };
+
+        const wins = num('wins', 'W') ?? 0;
+        const losses = num('losses', 'L') ?? 0;
+        const games = wins + losses;
+        const pctValue = num('winPercent', 'PCT') ?? (games ? wins / games : 0);
+        const fixed1 = v => (v === null ? null : v.toFixed(1));
+        const diff = num('differential', 'DIFF');
+        const abbr = team.abbreviation || '';
+
+        return {
+            id: String(team.id ?? abbr),
+            abbr,
+            name: team.shortDisplayName || team.name || team.displayName || abbr,
+            fullName: team.displayName || team.shortDisplayName || abbr,
+            logo: team.logos?.[0]?.href || (abbr ? `https://a.espncdn.com/i/teamlogos/nba/500/${abbr.toLowerCase()}.png` : ''),
+            seed: num('playoffSeed', 'SEED') ?? 0,
+            wins,
+            pctValue,
+            w: String(wins),
+            l: String(losses),
+            pct: text('winPercent', 'PCT') ?? pctValue.toFixed(3).replace(/^0/, ''),
+            gb: text('gamesBehind', 'GB'),
+            home: text('home', 'Home'),
+            away: text('road', 'Road', 'away', 'Away'),
+            conf: text('vsconf', 'vs. Conf.', 'CONF'),
+            l10: text('lasttengames', 'Last Ten Games', 'L10'),
+            streak: text('streak', 'STRK'),
+            ppg: fixed1(num('avgPointsFor', 'PPG')),
+            oppg: fixed1(num('avgPointsAgainst', 'OPP PPG')),
+            diffValue: diff,
+            diff: diff === null ? null : `${diff > 0 ? '+' : ''}${diff.toFixed(1)}`
+        };
+    }
+
+    renderStandings() {
+        const body = this.dom.standingsBody;
+        if (!body || !this.standings) return;
+        const head = STANDINGS_COLS.map(c =>
+            `<th scope="col"><abbr title="${this.escape(c.title)}">${this.escape(c.label)}</abbr></th>`).join('');
+
+        body.innerHTML = this.standings.conferences.map(conf => {
+            const rows = conf.rows.map((r, i) => {
+                // Lines under the last playoff seed (6) and last play-in seed (10)
+                const cut = i === 5 ? 'cut-playoff' : i === 9 ? 'cut-playin' : '';
+                const cells = STANDINGS_COLS.map(c => {
+                    const v = r[c.key];
+                    let cls = '';
+                    if (c.key === 'diff' && r.diffValue) cls = r.diffValue > 0 ? 'pos' : 'neg';
+                    if (c.key === 'streak' && v) cls = /^W/i.test(v) ? 'pos' : /^L/i.test(v) ? 'neg' : '';
+                    return `<td class="${cls}">${v === null || v === undefined ? '—' : this.escape(v)}</td>`;
+                }).join('');
+                return `
+                    <tr class="${cut}">
+                        <td class="st-seed">${i + 1}</td>
+                        <th scope="row" class="st-team">
+                            <img src="${this.escape(r.logo)}" alt="" class="st-logo" loading="lazy" width="24" height="24">
+                            <span class="st-name" title="${this.escape(r.fullName)}">${this.escape(r.name)}</span>
+                        </th>
+                        ${cells}
+                    </tr>`;
+            }).join('');
+            return `
+                <article class="standings-card">
+                    <h3 class="standings-conf">${this.escape(conf.name)}</h3>
+                    <div class="standings-scroll">
+                        <table class="standings-table">
+                            <thead><tr><th scope="col"><abbr title="Seed">#</abbr></th><th scope="col" class="st-team">Team</th>${head}</tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                </article>`;
+        }).join('') + `
+            <p class="standings-key"><span class="key-line playoff"></span>Playoff line <span class="key-line playin"></span>Play-in line</p>`;
+
+        body.querySelectorAll('.st-logo').forEach(img =>
+            img.addEventListener('error', () => { img.style.visibility = 'hidden'; }, { once: true }));
     }
 
     showToast(message) {
