@@ -31,6 +31,7 @@ const ESPN_ATHLETE_HOSTS = [
 const STANDINGS_URL = 'https://site.api.espn.com/apis/v2/sports/basketball/nba/standings';
 const STANDINGS_TTL = 5 * 60 * 1000; // keep standings 5 min before refetching
 const VIEW_KEY = 'nbaLiveHub.view';
+const FAV_KEY = 'nbaLiveHub.favorites';
 
 // Standings columns: key on the normalized row, header label, full name for the tooltip
 const STANDINGS_COLS = [
@@ -110,6 +111,7 @@ class NBAApp {
         this.openPlayerId = null;
         this.playerCache = new Map();
         this.view = 'scores';
+        this.favorites = this.loadFavorites(); // Set of ESPN team ids
         this.gamesLoaded = false;
         this.standings = null; // { conferences, at }
         this.standingsJob = null;
@@ -194,6 +196,11 @@ class NBAApp {
         });
 
         grid?.addEventListener('click', (e) => {
+            const fav = e.target.closest('.fav-btn');
+            if (fav) {
+                this.toggleFavorite(fav.dataset.teamId);
+                return;
+            }
             const btn = e.target.closest('.card-open');
             if (btn) this.openGame(btn.dataset.gameId);
         });
@@ -466,7 +473,9 @@ class NBAApp {
 
         // Live first, then upcoming, then finals
         const order = { in: 0, pre: 1, post: 2 };
-        const sorted = [...this.games].sort((a, b) => order[a.state] - order[b.state]);
+        // Favorite teams' games first, then live, upcoming, finals
+        const sorted = [...this.games].sort((a, b) =>
+            (this.isFavGame(b) - this.isFavGame(a)) || (order[a.state] - order[b.state]));
         sorted.forEach(game => this.dom.grid.appendChild(this.renderCard(game)));
 
         // Keep an open box score in sync with refreshed data
@@ -505,6 +514,9 @@ class NBAApp {
         const card = clone.querySelector('.game-card');
 
         card.classList.toggle('is-live', game.isLive);
+        const fav = this.isFavGame(game);
+        card.classList.toggle('is-fav', fav);
+        card.querySelector('.fav-tag').hidden = !fav;
         if (game.away.color) card.style.setProperty('--away', game.away.color);
         if (game.home.color) card.style.setProperty('--home', game.home.color);
 
@@ -548,6 +560,17 @@ class NBAApp {
             logoEl.remove();
         }
         nameEl.textContent = team.name || team.abbr || 'Team';
+
+        const favBtn = card.querySelector(`.${side}-fav`);
+        if (team.id) {
+            const on = this.favorites.has(String(team.id));
+            favBtn.dataset.teamId = String(team.id);
+            favBtn.setAttribute('aria-pressed', String(on));
+            favBtn.setAttribute('aria-label', `${on ? 'Unfavorite' : 'Favorite'} ${nameEl.textContent}`);
+            favBtn.querySelector('i').className = `${on ? 'fa-solid' : 'fa-regular'} fa-star`;
+        } else {
+            favBtn.remove();
+        }
         recordEl.textContent = team.record || '';
         scoreEl.textContent = game.state !== 'pre' && team.score !== null ? String(team.score) : '';
 
@@ -947,6 +970,35 @@ class NBAApp {
         } else if (this.isToday(this.currentDate)) {
             this.loadGames(true); // catch up on scores missed while away
         }
+    }
+
+    // ---- Favorite teams ----
+
+    loadFavorites() {
+        try {
+            const ids = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+            return new Set(Array.isArray(ids) ? ids.map(String) : []);
+        } catch {
+            return new Set();
+        }
+    }
+
+    saveFavorites() {
+        try { localStorage.setItem(FAV_KEY, JSON.stringify([...this.favorites])); } catch { /* storage blocked */ }
+    }
+
+    isFavGame(game) {
+        return this.favorites.has(String(game.home?.id)) || this.favorites.has(String(game.away?.id));
+    }
+
+    toggleFavorite(teamId) {
+        if (!teamId) return;
+        if (this.favorites.has(teamId)) this.favorites.delete(teamId);
+        else this.favorites.add(teamId);
+        this.saveFavorites();
+        this.render();
+        // Keep keyboard focus on the same star after the grid re-renders
+        this.dom.grid?.querySelector(`.fav-btn[data-team-id="${CSS.escape(teamId)}"]`)?.focus();
     }
 
     // ---- Standings ----
