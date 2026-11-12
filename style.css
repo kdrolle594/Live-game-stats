@@ -65,6 +65,8 @@ button {
     top: 0;
     z-index: 100;
     margin: -16px -20px 0;
+    /* Clear the notch when installed as an app on iPhone */
+    padding-top: max(12px, env(safe-area-inset-top));
 }
 
 .logo {
@@ -997,6 +999,7 @@ td.tops {
         flex-wrap: wrap;
         margin: -12px -16px 0;
         padding: 10px 16px;
+        padding-top: max(10px, env(safe-area-inset-top));
     }
 
     .date-navigator {

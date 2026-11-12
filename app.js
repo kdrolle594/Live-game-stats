@@ -222,7 +222,9 @@ class NBAApp {
         } catch (error) {
             console.error('Error loading games:', error);
             this.games = this.getMockData();
-            this.showToast('Couldn’t reach the score service. Showing sample games.');
+            this.showToast(navigator.onLine === false
+                ? 'You’re offline. Showing sample games until you reconnect.'
+                : 'Couldn’t reach the score service. Showing sample games.');
         }
         this.render();
     }
@@ -974,6 +976,13 @@ class NBAApp {
         games.forEach(g => { if (g.box) g.leaders = this.boxLeaders(g.box); });
         return games;
     }
+}
+
+// Service worker makes the site installable and work offline
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(err => console.error('Service worker failed', err));
+    });
 }
 
 // Start App
