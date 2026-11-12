@@ -157,6 +157,15 @@ button {
     color: var(--amber);
 }
 
+.install-btn {
+    color: var(--amber);
+    border-color: var(--amber-glow);
+}
+
+.install-btn[hidden] {
+    display: none;
+}
+
 .icon-btn {
     background: transparent;
     border: 1px solid var(--line);
@@ -964,6 +973,10 @@ td.tops {
     border-radius: 8px;
     font-size: 0.875rem;
     z-index: 1000;
+}
+
+.toast.info {
+    border-left-color: var(--amber);
 }
 
 .main-footer {

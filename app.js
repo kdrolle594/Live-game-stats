@@ -115,6 +115,7 @@ class NBAApp {
 
     init() {
         this.setupEventListeners();
+        this.setupInstall();
         this.loadGames();
 
         // Auto-refresh every 30s if viewing today
@@ -878,13 +879,53 @@ class NBAApp {
             </section>`;
     }
 
-    showToast(message) {
+    // Install button: browsers don't reliably show their own install prompt
+    // (iPhone never does), so offer one in the header.
+    setupInstall() {
+        const btn = document.getElementById('install-btn');
+        if (!btn) return;
+
+        const installed = window.matchMedia('(display-mode: standalone)').matches
+            || window.navigator.standalone === true;
+        if (installed) return;
+
+        // iPhone/iPad Safari: no install API, show the manual steps instead
+        const ua = navigator.userAgent;
+        const isIOS = /iphone|ipad|ipod/i.test(ua)
+            || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        if (isIOS) {
+            btn.hidden = false;
+            btn.addEventListener('click', () => {
+                this.showToast('To install: tap the Share button, then “Add to Home Screen”.', 'info', 8000);
+            });
+            return;
+        }
+
+        // Chrome, Edge, Android: use the browser's install dialog
+        const show = () => { btn.hidden = !deferredInstallPrompt; };
+        show();
+        window.addEventListener('installpromptready', show);
+        btn.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) return;
+            deferredInstallPrompt.prompt();
+            await deferredInstallPrompt.userChoice;
+            deferredInstallPrompt = null;
+            show();
+        });
+        window.addEventListener('appinstalled', () => {
+            deferredInstallPrompt = null;
+            show();
+            this.showToast('Installed. Open NBA Live Hub from your home screen or apps.', 'info');
+        });
+    }
+
+    showToast(message, tone = 'error', duration = 5000) {
         const toast = document.createElement('div');
-        toast.className = 'toast';
+        toast.className = tone === 'info' ? 'toast info' : 'toast';
         toast.setAttribute('role', 'status');
         toast.textContent = message;
         document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 5000);
+        setTimeout(() => toast.remove(), duration);
     }
 
     hideBrokenImage(img) {
@@ -977,6 +1018,15 @@ class NBAApp {
         return games;
     }
 }
+
+// Browsers fire this when the site can be installed; keep it for the Install button.
+// Captured at load because it can fire before the app starts.
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    window.dispatchEvent(new Event('installpromptready'));
+});
 
 // Service worker makes the site installable and work offline
 if ('serviceWorker' in navigator) {
