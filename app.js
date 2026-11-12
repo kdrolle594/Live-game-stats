@@ -53,7 +53,7 @@ const CHAMPIONS = {
     1990: 8, 1991: 4, 1992: 4, 1993: 4, 1994: 10, 1995: 10, 1996: 4, 1997: 4, 1998: 4, 1999: 24,
     2000: 13, 2001: 13, 2002: 13, 2003: 24, 2004: 8, 2005: 24, 2006: 14, 2007: 24, 2008: 2, 2009: 13,
     2010: 13, 2011: 6, 2012: 14, 2013: 14, 2014: 24, 2015: 9, 2016: 5, 2017: 9, 2018: 9, 2019: 28,
-    2020: 13, 2021: 15, 2022: 9, 2023: 7, 2024: 2, 2025: 25
+    2020: 13, 2021: 15, 2022: 9, 2023: 7, 2024: 2, 2025: 25, 2026: 18
 };
 
 // Awards shown on the player card, most prestigious first.
@@ -222,7 +222,9 @@ class NBAApp {
         } catch (error) {
             console.error('Error loading games:', error);
             this.games = this.getMockData();
-            this.showToast('Couldn’t reach the score service. Showing sample games.');
+            this.showToast(navigator.onLine === false
+                ? 'You’re offline. Showing sample games until you reconnect.'
+                : 'Couldn’t reach the score service. Showing sample games.');
         }
         this.render();
     }
@@ -974,6 +976,13 @@ class NBAApp {
         games.forEach(g => { if (g.box) g.leaders = this.boxLeaders(g.box); });
         return games;
     }
+}
+
+// Service worker makes the site installable and work offline
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(err => console.error('Service worker failed', err));
+    });
 }
 
 // Start App
