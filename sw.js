@@ -1,6 +1,6 @@
 // Service worker: makes the site installable and lets it open offline.
 // Bump VERSION when shell files change so old caches are cleared.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `shell-${VERSION}`;
 const ASSET_CACHE = `assets-${VERSION}`;
 const ASSET_LIMIT = 200; // logos, headshots, fonts
